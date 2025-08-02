@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import authRouters from './routes/auth';
 import userRouters from './routes/user';
+import taskRouters from './routes/task';
 
 dotenv.config();
 
@@ -12,7 +13,7 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-app.use('/api', [authRouters, userRouters]);
+app.use('/api', [authRouters, userRouters, taskRouters]);
 
 app.get('/', (req, res) => {
   res.send('Backend is working!');
