@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import authRouters from './routes/auth';
 import userRouters from './routes/user';
 import taskRouters from './routes/task';
+import bugRouters from './routes/bug';
 
 dotenv.config();
 
@@ -13,7 +14,7 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-app.use('/api', [authRouters, userRouters, taskRouters]);
+app.use('/api', [authRouters, userRouters, taskRouters, bugRouters]);
 
 app.get('/', (req, res) => {
   res.send('Backend is working!');

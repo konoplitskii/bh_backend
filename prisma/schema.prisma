@@ -25,6 +25,13 @@ enum JobRole {
   other
 }
 
+enum BugStatus {
+  open // баг создан, открыт
+  in_progress // баг в разработке (взяли в работу)
+  testing // баг на тестировании
+  fixed // баг исправлен
+}
+
 model User {
   id        String   @id @default(uuid())
   password  String?
@@ -49,11 +56,11 @@ model Task {
 }
 
 model Bug {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   title       String
   description String
-  status      String   @default("open") // например: open, closed, in_progress
-  createdAt   DateTime @default(now())
+  status      BugStatus @default(open)
+  createdAt   DateTime  @default(now())
 
   taskId String
   task   Task   @relation(fields: [taskId], references: [id])
