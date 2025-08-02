@@ -1,0 +1,9 @@
+# Node.js
+node_modules/
+dist/
+
+# Env files
+.env
+
+# Prisma generated client (если генерируется в src)
+src/generated/prisma/
