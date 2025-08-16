@@ -66,8 +66,26 @@ export const loginUser = async (req: Request, res: Response) => {
     // Создаем JWT
     const token = jwt.sign({ userId: user.id, name: user.name }, JWT_SECRET, { expiresIn: '1h' });
 
-    res.json({ token });
+    // Записываем токен в httpOnly cookie
+    res.cookie('token', token, {
+      httpOnly: true, // нельзя прочитать через JS
+      secure: process.env.NODE_ENV === 'production', // только https в продакшне
+      sameSite: 'strict', // кука только с этого сайта
+      maxAge: 60 * 60 * 1000, // 1 час
+    });
+
+    return res.json({ message: 'Авторизация успешна', data: { result: true } });
   } catch (error) {
     res.status(500).json({ message: 'Ошибка авторизации на сервере', error });
   }
+};
+
+// Выход из системы
+export const logoutUser = (req: Request, res: Response) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production', //только запросы с https
+    sameSite: 'strict',
+  });
+  return res.json({ message: 'Вы вышли из системы' });
 };

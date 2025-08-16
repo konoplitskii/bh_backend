@@ -1,5 +1,6 @@
 import express from 'express';
 import cors, { CorsOptions } from 'cors';
+import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import authRouters from './routes/auth';
 import userRouters from './routes/user';
@@ -33,6 +34,7 @@ const corsOptions: CorsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use(cookieParser());
 
 app.use('/api', [authRouters, userRouters, taskRouters, bugRouters]);
 
