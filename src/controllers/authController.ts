@@ -35,7 +35,7 @@ export const registerUser = async (req: Request, res: Response) => {
       data: { name, password: hashedPassword, role: role },
     });
 
-    res.status(201).json({ message: 'Пользователь создан', data: { userId: user.id } });
+    res.status(201).json({ message: 'Пользователь создан', data: { result: true, userId: user.id } });
   } catch (error) {
     res.status(500).json({ message: 'Ошибка регистрации пользователя', data: { error } });
   }
