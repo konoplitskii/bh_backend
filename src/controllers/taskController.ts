@@ -9,7 +9,7 @@ export const createTask = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Не авторизован' });
     }
 
-    const { title } = req.body || {};
+    const { title, description } = req.body || {};
     if (!title) {
       return res.status(400).json({ message: 'Не указано название задачи' });
     }
@@ -17,11 +17,12 @@ export const createTask = async (req: Request, res: Response) => {
     const task = await prisma.task.create({
       data: {
         title,
+        description,
         userId, // связываем с пользователем
       },
     });
 
-    res.status(201).json({ message: 'Задача создана', data: task });
+    res.status(201).json({ result: true, message: 'Задача создана', data: task });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Ошибка создания задачи', error });
@@ -72,7 +73,7 @@ export const getTask = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Задача не найдена или нет доступа' });
     }
 
-    res.json({ data: task });
+    res.json({ task });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Ошибка получения задачи', error });
