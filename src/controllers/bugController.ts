@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
-
-const allowedStatuses = ['open', 'in_progress', 'testing', 'fixed'];
+import { Prisma } from '@prisma/client';
 
 //Получение бага по ID
 export const getBug = async (req: Request, res: Response) => {
@@ -167,5 +166,67 @@ export const updateBug = async (req: Request, res: Response) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Ошибка при обновлении бага', error });
+  }
+};
+
+// Получение всех багов  определенной задачи по ID
+const allowedStatuses = ['in_progress', 'testing', 'fixed'] as const;
+
+export const getTaskBugs = async (req: Request, res: Response) => {
+  console.log('req.query', req.query);
+
+  try {
+    const userId = req.user?.userId;
+    const taskId = req.params.id;
+    const { status, q } = req.query;
+
+    if (!userId) return res.status(401).json({ message: 'Не авторизован' });
+    if (!taskId) return res.status(400).json({ message: 'Не указан ID задачи' });
+
+    // проверяем доступ и берём название
+    const task = await prisma.task.findFirst({
+      where: {
+        id: taskId,
+        OR: [
+          { userId }, // владелец
+          { participants: { some: { userId } } }, // участник
+        ],
+      },
+      select: { id: true, title: true },
+    });
+
+    if (!task) {
+      return res.status(404).json({ message: 'Задача не найдена или нет доступа' });
+    }
+
+    // фильтры
+    const where: Prisma.BugWhereInput = { taskId: task.id };
+
+    if (typeof status === 'string') {
+      if (!allowedStatuses.includes(status as any)) {
+        return res.status(400).json({ message: 'Недопустимый статус бага' });
+      }
+      where.status = status as any;
+    }
+
+    if (typeof q === 'string' && q.trim()) {
+      where.title = { contains: q.trim(), mode: 'insensitive' };
+    }
+
+    // получаем все баги по задаче
+    const bugs = await prisma.bug.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return res.json({
+      data: {
+        task, // { id, title }
+        bugs,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Ошибка получения багов задачи', error });
   }
 };

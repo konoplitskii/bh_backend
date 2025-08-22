@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/authenticateToken';
-import { profileUser } from '../controllers/usersController';
+import { getUsers, profileUser } from '../controllers/usersController';
 
 const router = Router();
 
 router.get('/me', authenticateToken, profileUser);
+router.get('/users', authenticateToken, getUsers);
 
 export default router;

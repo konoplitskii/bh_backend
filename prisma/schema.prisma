@@ -26,10 +26,9 @@ enum JobRole {
 }
 
 enum BugStatus {
-  open // баг создан, открыт
-  in_progress // баг в разработке (взяли в работу)
-  testing // баг на тестировании
-  fixed // баг исправлен
+  in_progress
+  testing
+  fixed
 }
 
 model User {
@@ -40,7 +39,13 @@ model User {
   role      Role     @default(user)
   jobRole   JobRole  @default(other)
 
+  // задачи, где пользователь — СОЗДАТЕЛЬ (владелец)
   tasks Task[]
+
+  // задачи, где пользователь — УЧАСТНИК
+  taskMemberships TaskParticipant[]
+
+  @@index([name])
 }
 
 model Task {
@@ -49,20 +54,53 @@ model Task {
   description String
   done        Boolean  @default(false)
   createdAt   DateTime @default(now())
+  // (опционально) видимость:
+  // hidden      Boolean  @default(false)
 
+  // СОЗДАТЕЛЬ/ВЛАДЕЛЕЦ
   userId String
   user   User   @relation(fields: [userId], references: [id])
 
-  bugs Bug[] // связь: у задачи много багов
+  // УЧАСТНИКИ
+  participants TaskParticipant[]
+
+  // БАГИ
+  bugs Bug[]
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+model TaskParticipant {
+  // явная таблица связки: один пользователь — участник одной задачи
+  taskId String
+  userId String
+
+  // (опционально) роль участника в задаче, если понадобится
+  // role   String? // например: "assignee" | "watcher"
+
+  // (опционально) метаданные участия
+  addedAt DateTime @default(now())
+
+  // связи
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // составной первичный ключ не даёт добавить одного и того же участника дважды
+  @@id([taskId, userId])
+  // удобный индекс для выборки «все задачи пользователя-участника»
+  @@index([userId])
 }
 
 model Bug {
   id          String    @id @default(uuid())
   title       String
   description String
-  status      BugStatus @default(open)
+  status      BugStatus @default(in_progress)
   createdAt   DateTime  @default(now())
 
   taskId String
   task   Task   @relation(fields: [taskId], references: [id])
+
+  @@index([taskId, status])
 }
