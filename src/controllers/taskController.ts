@@ -130,35 +130,43 @@ export const getTasks1 = async (req: Request, res: Response) => {
 };
 
 // Получение задач (владелец ИЛИ участник)
+// GET /task
 export const getTasks = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ message: 'Не авторизован' });
 
-    const tasks = await prisma.task.findMany({
-      where: {
-        OR: [
-          { userId }, // я создатель
-          { participants: { some: { userId } } }, // я участник
-        ],
-      },
-      include: {
-        user: {
-          // владелец
-          select: { id: true, name: true, role: true, jobRole: true },
+    const include = {
+      user: { select: { id: true, name: true, role: true, jobRole: true } }, // владелец
+      participants: {
+        include: {
+          user: { select: { id: true, name: true, role: true, jobRole: true } },
         },
-        participants: {
-          // участники с данными пользователя
-          include: {
-            user: { select: { id: true, name: true, role: true, jobRole: true } },
-          },
-        },
-        bugs: true, // если нужны баги
       },
-      orderBy: { createdAt: 'desc' },
-    });
+      bugs: true,
+    } as const;
 
-    return res.json({ tasks });
+    const orderBy = { createdAt: 'desc' } as const;
+
+    const [ownedTasks, participatingTasks] = await Promise.all([
+      // задачи, где он СОЗДАТЕЛЬ
+      prisma.task.findMany({
+        where: { userId },
+        include,
+        orderBy,
+      }),
+      // задачи, где он УЧАСТНИК (не создатель)
+      prisma.task.findMany({
+        where: {
+          userId: { not: userId },
+          participants: { some: { userId } },
+        },
+        include,
+        orderBy,
+      }),
+    ]);
+
+    return res.json({ ownedTasks, participatingTasks });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Ошибка получения задач', error });
