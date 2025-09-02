@@ -44,6 +44,7 @@ model User {
 
   // задачи, где пользователь — УЧАСТНИК
   taskMemberships TaskParticipant[]
+  HiddenTask      HiddenTask[]
 
   @@index([name])
 }
@@ -65,10 +66,26 @@ model Task {
   participants TaskParticipant[]
 
   // БАГИ
-  bugs Bug[]
+  bugs       Bug[]
+  HiddenTask HiddenTask[]
 
   @@index([userId, createdAt])
   @@index([createdAt])
+}
+
+model HiddenTask {
+  id       String   @id @default(uuid())
+  userId   String
+  taskId   String
+  hiddenAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  // Уникальный ключ: один пользователь может скрыть задачу только один раз
+  @@unique([userId, taskId])
+  @@index([userId])
+  @@index([taskId])
 }
 
 model TaskParticipant {

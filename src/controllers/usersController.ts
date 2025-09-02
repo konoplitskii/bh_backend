@@ -52,45 +52,8 @@ export const profileUser = async (req: Request, res: Response) => {
       },
     });
     if (!user) return res.status(404).json({ message: 'Пользователь не найден' });
-
-    // 2) задачи, где он СОЗДАТЕЛЬ
-    const ownedTasks = await prisma.task.findMany({
-      where: { userId },
-      include: {
-        user: { select: { id: true, name: true, role: true, jobRole: true } }, // владелец (он же)
-        participants: {
-          include: {
-            user: { select: { id: true, name: true, role: true, jobRole: true } },
-          },
-        },
-        bugs: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    // 3) задачи, где он УЧАСТНИК (исключим те, что созданы им самим, чтобы не дублировать)
-    const participatingTasks = await prisma.task.findMany({
-      where: {
-        userId: { not: userId },
-        participants: { some: { userId } },
-      },
-      include: {
-        user: { select: { id: true, name: true, role: true, jobRole: true } }, // владелец
-        participants: {
-          include: {
-            user: { select: { id: true, name: true, role: true, jobRole: true } },
-          },
-        },
-        bugs: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    // 4) итоговый ответ
     return res.json({
       ...user,
-      ownedTasks,
-      participatingTasks,
     });
   } catch (error) {
     console.error(error);

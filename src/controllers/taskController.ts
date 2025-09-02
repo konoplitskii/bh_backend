@@ -131,13 +131,15 @@ export const getTasks1 = async (req: Request, res: Response) => {
 
 // Получение задач (владелец ИЛИ участник)
 // GET /task
+// GET /task?status=active|completed|hidden
 export const getTasks = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
+    const status = req.query.status as string; // 'active', 'completed', 'hidden'
     if (!userId) return res.status(401).json({ message: 'Не авторизован' });
 
     const include = {
-      user: { select: { id: true, name: true, role: true, jobRole: true } }, // владелец
+      user: { select: { id: true, name: true, role: true, jobRole: true } },
       participants: {
         include: {
           user: { select: { id: true, name: true, role: true, jobRole: true } },
@@ -148,25 +150,66 @@ export const getTasks = async (req: Request, res: Response) => {
 
     const orderBy = { createdAt: 'desc' } as const;
 
-    const [ownedTasks, participatingTasks] = await Promise.all([
-      // задачи, где он СОЗДАТЕЛЬ
-      prisma.task.findMany({
-        where: { userId },
-        include,
-        orderBy,
-      }),
-      // задачи, где он УЧАСТНИК (не создатель)
-      prisma.task.findMany({
-        where: {
-          userId: { not: userId },
-          participants: { some: { userId } },
-        },
-        include,
-        orderBy,
-      }),
-    ]);
+    // Получаем ID всех скрытых задач пользователя
+    const hiddenTasks = await prisma.hiddenTask.findMany({
+      where: { userId },
+      select: { taskId: true },
+    });
+    const hiddenTaskIds = hiddenTasks.map((ht) => ht.taskId);
 
-    return res.json({ ownedTasks, participatingTasks });
+    // Базовые условия для задач пользователя
+    const userTasksCondition = {
+      OR: [
+        { userId }, // создатель
+        { participants: { some: { userId } } }, // участник
+      ],
+    };
+
+    let whereCondition: any = {};
+
+    switch (status) {
+      case 'completed':
+        // Только завершенные задачи (не скрытые)
+        whereCondition = {
+          ...userTasksCondition,
+          done: true,
+          id: { notIn: hiddenTaskIds },
+        };
+        break;
+
+      case 'hidden':
+        // Только скрытые задачи
+        whereCondition = {
+          ...userTasksCondition,
+          id: { in: hiddenTaskIds },
+        };
+        break;
+
+      case 'active':
+      default:
+        // Активные задачи (не завершенные и не скрытые) - по умолчанию
+        whereCondition = {
+          ...userTasksCondition,
+          done: false,
+          id: { notIn: hiddenTaskIds },
+        };
+        break;
+    }
+
+    const tasks = await prisma.task.findMany({
+      where: whereCondition,
+      include,
+      orderBy,
+    });
+
+    // Разделяем задачи на созданные и участия
+    const result = {
+      ownedTasks: tasks.filter((task) => task.userId === userId),
+      participatingTasks: tasks.filter((task) => task.userId !== userId),
+      hiddenTasks: status === 'hidden' ? tasks : [],
+    };
+
+    return res.json(result);
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Ошибка получения задач', error });
@@ -283,5 +326,78 @@ export const updateTask = async (req: Request, res: Response) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Ошибка обновления задачи', error });
+  }
+};
+
+export const hideTask = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    const taskId = req.params.id;
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Не авторизован' });
+    }
+
+    // Проверяем что задача существует и пользователь имеет к ней доступ
+    const task = await prisma.task.findFirst({
+      where: {
+        id: taskId,
+        OR: [
+          { userId }, // создатель задачи
+          { participants: { some: { userId } } }, // участник задачи
+        ],
+      },
+    });
+
+    if (!task) {
+      return res.status(404).json({ message: 'Задача не найдена или нет доступа' });
+    }
+
+    // Проверяем не скрыта ли уже задача
+    const existingHidden = await prisma.hiddenTask.findUnique({
+      where: { userId_taskId: { userId, taskId } },
+    });
+
+    if (existingHidden) {
+      return res.status(400).json({ message: 'Задача уже скрыта' });
+    }
+
+    await prisma.hiddenTask.create({
+      data: { userId, taskId },
+    });
+
+    return res.json({ message: 'Задача скрыта' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Ошибка скрытия задачи', error });
+  }
+};
+
+export const unhideTask = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    const taskId = req.params.id;
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Не авторизован' });
+    }
+
+    // Проверяем что задача была скрыта этим пользователем
+    const hiddenTask = await prisma.hiddenTask.findUnique({
+      where: { userId_taskId: { userId, taskId } },
+    });
+
+    if (!hiddenTask) {
+      return res.status(404).json({ message: 'Задача не была скрыта' });
+    }
+
+    await prisma.hiddenTask.delete({
+      where: { userId_taskId: { userId, taskId } },
+    });
+
+    return res.json({ message: 'Задача показана' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Ошибка показа задачи', error });
   }
 };
