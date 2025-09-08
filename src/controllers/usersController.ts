@@ -85,6 +85,8 @@ export const getUsers = async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' },
     });
 
+    await new Promise((resolve, reject) => setTimeout(resolve, 2000)); // 2 секунды
+
     return res.json({ users });
   } catch (error) {
     console.error(error);

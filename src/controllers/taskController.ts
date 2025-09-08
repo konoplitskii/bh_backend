@@ -38,10 +38,14 @@ export const createTask = async (req: Request, res: Response) => {
     const {
       title,
       description = '',
+      linkDesign = '',
+      linkJira = '',
       participantIds = [],
     } = (req.body ?? {}) as {
       title?: string;
       description?: string;
+      linkDesign?: string;
+      linkJira?: string;
       participantIds?: string[];
     };
 
@@ -69,6 +73,8 @@ export const createTask = async (req: Request, res: Response) => {
         data: {
           title: title.trim(),
           description,
+          linkDesign,
+          linkJira,
           userId: ownerId,
         },
       });

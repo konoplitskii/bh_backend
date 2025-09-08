@@ -31,6 +31,14 @@ enum BugStatus {
   fixed
 }
 
+enum MediaType {
+  IMAGE
+  DOCUMENT
+  VIDEO
+  AUDIO
+  OTHER
+}
+
 model User {
   id        String   @id @default(uuid())
   password  String?
@@ -49,6 +57,20 @@ model User {
   @@index([name])
 }
 
+model TaskMedia {
+  id        String    @id @default(uuid())
+  url       String
+  type      MediaType
+  name      String
+  size      Int?
+  createdAt DateTime  @default(now())
+
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+}
+
 model Task {
   id          String   @id @default(uuid())
   title       String
@@ -64,6 +86,15 @@ model Task {
 
   // УЧАСТНИКИ
   participants TaskParticipant[]
+
+  // ССЫЛКА НА МАКЕТ
+  linkDesign String
+
+  // // ССЫЛКА НА Jira
+  linkJira String
+
+  // Медиа файлы
+  media TaskMedia[]
 
   // БАГИ
   bugs       Bug[]
