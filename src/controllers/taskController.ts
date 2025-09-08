@@ -209,6 +209,8 @@ export const getTasks = async (req: Request, res: Response) => {
       hiddenTasks: status === 'hidden' ? tasks : [],
     };
 
+    // await new Promise((resolve) => setTimeout(resolve, 2000)); // 2 секунды
+
     return res.json(result);
   } catch (error) {
     console.error(error);

@@ -34,6 +34,8 @@ export const profileUser = async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ message: 'Не авторизован' });
 
+    // await new Promise((resolve) => setTimeout(resolve, 2000)); // 2 секунды
+
     // 1) базовая инфа о пользователе + счётчики
     const user = await prisma.user.findUnique({
       where: { id: userId },
