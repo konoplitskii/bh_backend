@@ -1,5 +1,10 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import path from 'path';
+import fs from 'fs';
+import { deleteTaskFilesFromFS } from '../utils/deleteTaskFilesFromFS';
+
+const tasksUploadDir = path.join(process.cwd(), 'uploads', 'tasks');
 
 //Создания задачи
 export const createTask1 = async (req: Request, res: Response) => {
@@ -31,71 +36,157 @@ export const createTask1 = async (req: Request, res: Response) => {
 
 // Создание задачи + добавление участников (без hidden)
 export const createTask = async (req: Request, res: Response) => {
+  console.log('req.body:', req.body);
+  console.log('req.files:', req.files);
+
   try {
     const ownerId = req.user?.userId;
-    if (!ownerId) return res.status(401).json({ message: 'Не авторизован' });
+    if (!ownerId) {
+      return res.status(401).json({ message: 'Не авторизован' });
+    }
 
-    const {
-      title,
-      description = '',
-      linkDesign = '',
-      linkJira = '',
-      participantIds = [],
-    } = (req.body ?? {}) as {
-      title?: string;
-      description?: string;
-      linkDesign?: string;
-      linkJira?: string;
-      participantIds?: string[];
-    };
+    // Получаем данные из formData
+    const { title, description = '', linkDesign = '', linkJira = '', participantIds = [] } = req.body;
 
+    // Проверяем обязательные поля
     if (!title?.trim()) {
+      // Удаляем временные файлы если ошибка валидации
+      if (req.files) {
+        req.files.forEach((file) => {
+          try {
+            if (fs.existsSync(file.path)) {
+              fs.unlinkSync(file.path);
+            }
+          } catch (err) {
+            console.error('Ошибка удаления временного файла:', err);
+          }
+        });
+      }
       return res.status(400).json({ message: 'Не указано название задачи' });
     }
 
-    // нормализуем участников: строки, без пустых/дублей, исключаем владельца
-    const rawIds = Array.isArray(participantIds) ? participantIds : [];
-    const uniqueIds = Array.from(new Set(rawIds.map(String).filter(Boolean))).filter((id) => id !== ownerId);
+    // Обрабатываем participantIds (может быть массивом или строкой)
+    let participantIdsArray: string[] = [];
+    if (Array.isArray(participantIds)) {
+      participantIdsArray = participantIds;
+    } else if (typeof participantIds === 'string' && participantIds) {
+      participantIdsArray = [participantIds];
+    }
 
-    // (опц.) проверим, что такие пользователи существуют
-    let validIds = uniqueIds;
-    if (uniqueIds.length) {
-      const users = await prisma.user.findMany({
-        where: { id: { in: uniqueIds } },
+    // Убираем дубли и пустые значения, исключаем владельца
+    const uniqueIds = Array.from(new Set(participantIdsArray.map((id) => id.toString().trim()).filter((id) => id && id !== ownerId)));
+
+    // Проверяем существование пользователей
+    let validParticipantIds: string[] = [];
+    if (uniqueIds.length > 0) {
+      const existingUsers = await prisma.user.findMany({
+        where: {
+          id: { in: uniqueIds },
+          // Дополнительная проверка что пользователь не удален и т.д.
+        },
         select: { id: true },
       });
-      const existing = new Set(users.map((u) => u.id));
-      validIds = uniqueIds.filter((id) => existing.has(id));
+      validParticipantIds = existingUsers.map((user) => user.id);
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      // 1. Создаем задачу
       const task = await tx.task.create({
         data: {
           title: title.trim(),
-          description,
-          linkDesign,
-          linkJira,
+          description: description || '',
+          linkDesign: linkDesign || '',
+          linkJira: linkJira || '',
           userId: ownerId,
         },
       });
 
-      if (validIds.length) {
+      // 2. Добавляем участников если есть
+      if (validParticipantIds.length > 0) {
         await tx.taskParticipant.createMany({
-          data: validIds.map((uid) => ({ taskId: task.id, userId: uid })),
+          data: validParticipantIds.map((userId) => ({
+            taskId: task.id,
+            userId: userId,
+          })),
           skipDuplicates: true,
         });
       }
 
-      // ⚠️ ВАЖНО: тут был include: { members: ... } — нужно participants
+      // 3. Обрабатываем файлы если есть
+      if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+        const mediaData = [];
+
+        for (const file of req.files) {
+          // Определяем тип медиа по MIME type
+          const getMediaType = (mimetype: string) => {
+            if (mimetype.startsWith('image/')) return 'IMAGE';
+            if (mimetype.startsWith('video/')) return 'VIDEO';
+            if (mimetype.startsWith('audio/')) return 'AUDIO';
+            if (mimetype.includes('pdf') || mimetype.includes('document') || mimetype.includes('text')) return 'DOCUMENT';
+            return 'OTHER';
+          };
+
+          // Новое имя файла с ID задачи
+          const timestamp = Date.now();
+          const safeName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+          const newFilename = `${task.id}_${timestamp}_${safeName}`;
+          const newPath = path.join(tasksUploadDir, newFilename);
+
+          try {
+            // Переименовываем файл
+            if (fs.existsSync(file.path)) {
+              fs.renameSync(file.path, newPath);
+
+              mediaData.push({
+                url: newFilename, // сохраняем только имя файла
+                type: getMediaType(file.mimetype),
+                name: file.originalname,
+                size: file.size,
+                taskId: task.id,
+              });
+            }
+          } catch (error) {
+            console.error('Ошибка переименования файла:', error);
+            // Удаляем временный файл если ошибка
+            if (fs.existsSync(file.path)) {
+              fs.unlinkSync(file.path);
+            }
+          }
+        }
+
+        // Сохраняем медиа в БД
+        if (mediaData.length > 0) {
+          await tx.taskMedia.createMany({
+            data: mediaData,
+          });
+        }
+      }
+
+      // 4. Получаем полную задачу с отношениями
       const fullTask = await tx.task.findUnique({
         where: { id: task.id },
         include: {
-          user: { select: { id: true, name: true, role: true, jobRole: true } }, // владелец
-          participants: {
-            include: {
-              user: { select: { id: true, name: true, role: true, jobRole: true } }, // данные участника
+          user: {
+            select: {
+              id: true,
+              name: true,
+              role: true,
+              jobRole: true,
             },
           },
+          participants: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  role: true,
+                  jobRole: true,
+                },
+              },
+            },
+          },
+          media: true,
           bugs: true,
         },
       });
@@ -109,8 +200,25 @@ export const createTask = async (req: Request, res: Response) => {
       data: result,
     });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: 'Ошибка создания задачи', error });
+    console.error('Ошибка создания задачи:', error);
+
+    // Удаляем временные файлы если ошибка
+    if (req.files) {
+      req.files.forEach((file) => {
+        try {
+          if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+          }
+        } catch (err) {
+          console.error('Ошибка удаления временного файла:', err);
+        }
+      });
+    }
+
+    return res.status(500).json({
+      message: 'Ошибка создания задачи',
+      error: process.env.NODE_ENV === 'development' ? error : undefined,
+    });
   }
 };
 
@@ -242,22 +350,41 @@ export const getTask = async (req: Request, res: Response) => {
         ],
       },
       include: {
-        user: { select: { id: true, name: true, role: true, jobRole: true } }, // владелец
+        user: { select: { id: true, name: true, role: true, jobRole: true } },
         participants: {
           include: {
-            user: { select: { id: true, name: true, role: true, jobRole: true } }, // участники
+            user: { select: { id: true, name: true, role: true, jobRole: true } },
           },
+        },
+        media: {
+          // Все файлы задачи
+          orderBy: { createdAt: 'desc' }, // Сортировка по дате
         },
         bugs: true,
       },
     });
 
     if (!task) {
-      // нельзя сказать, не существует ли задача, или нет прав — безопасный ответ
       return res.status(404).json({ message: 'Задача не найдена или нет доступа' });
     }
 
-    return res.json({ task });
+    // Форматируем URL для всех файлов
+    const taskWithFileUrls = {
+      ...task,
+      media: task.media.map((mediaItem) => ({
+        id: mediaItem.id,
+        url: `/uploads/tasks/${mediaItem.url}`, // Прямой путь к статике
+        type: mediaItem.type,
+        name: Buffer.from(mediaItem.name, 'latin1').toString('utf8'),
+        size: mediaItem.size,
+        createdAt: mediaItem.createdAt,
+      })),
+    };
+
+    return res.json({
+      task: taskWithFileUrls,
+      filesCount: task.media.length, // Количество файлов для информации
+    });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Ошибка получения задачи', error });
@@ -278,24 +405,95 @@ export const deleteTask = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Не указан ID задачи' });
     }
 
-    // Проверяем, что задача существует и принадлежит пользователю
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
+    // Используем транзакцию для атомарности
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Проверяем существование задачи и права доступа
+      const task = await tx.task.findUnique({
+        where: { id: taskId },
+        include: {
+          media: true, // Включаем медиафайлы для удаления
+          participants: true, // Включаем участников
+          bugs: true, // Включаем баги
+        },
+      });
+
+      if (!task) {
+        throw new Error('Задача не найдена');
+      }
+
+      // Проверяем права: только владелец может удалить задачу
+      if (task.userId !== userId) {
+        throw new Error('Нет прав для удаления задачи');
+      }
+
+      // 2. Получаем информацию о файлах перед удалением
+      const filesToDelete = task.media.map((media) => ({
+        id: media.id,
+        filename: media.url, // имя файла в файловой системе
+      }));
+
+      // 3. Удаляем связанные данные в правильном порядке (из-за foreign keys)
+
+      // Сначала удаляем баги (если есть зависимость от задачи)
+      if (task.bugs.length > 0) {
+        await tx.bug.deleteMany({
+          where: { taskId },
+        });
+      }
+
+      // Удаляем участников
+      if (task.participants.length > 0) {
+        await tx.taskParticipant.deleteMany({
+          where: { taskId },
+        });
+      }
+
+      // Удаляем медиафайлы из БД
+      if (task.media.length > 0) {
+        await tx.taskMedia.deleteMany({
+          where: { taskId },
+        });
+      }
+
+      // Удаляем скрытые задачи (если есть)
+      await tx.hiddenTask.deleteMany({
+        where: { taskId },
+      });
+
+      // 4. Удаляем саму задачу
+      await tx.task.delete({
+        where: { id: taskId },
+      });
+
+      return { task, filesToDelete };
     });
 
-    if (!task || task.userId !== userId) {
-      return res.status(404).json({ message: 'Задача не найдена или нет доступа' });
+    // 5. Удаляем физические файлы после успешного удаления из БД
+    if (result.filesToDelete.length > 0) {
+      await deleteTaskFilesFromFS(result.filesToDelete);
     }
 
-    // Удаляем задачу
-    await prisma.task.delete({
-      where: { id: taskId },
+    res.json({
+      message: 'Задача успешно удалена',
+      deletedFilesCount: result.filesToDelete.length,
+      deletedBugsCount: result.task.bugs.length,
+      deletedParticipantsCount: result.task.participants.length,
     });
-
-    res.json({ message: 'Задача успешно удалена' });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Ошибка при удалении задачи', error });
+    console.error('Ошибка при удалении задачи:', error);
+
+    if (error.message === 'Задача не найдена') {
+      return res.status(404).json({ message: 'Задача не найдена' });
+    }
+
+    if (error.message === 'Нет прав для удаления задачи') {
+      return res.status(403).json({ message: 'Нет прав для удаления задачи' });
+    }
+
+    res.status(500).json({
+      message: 'Ошибка при удалении задачи',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
   }
 };
 
