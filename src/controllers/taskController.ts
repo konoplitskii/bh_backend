@@ -36,9 +36,6 @@ export const createTask1 = async (req: Request, res: Response) => {
 
 // Создание задачи + добавление участников (без hidden)
 export const createTask = async (req: Request, res: Response) => {
-  console.log('req.body:', req.body);
-  console.log('req.files:', req.files);
-
   try {
     const ownerId = req.user?.userId;
     if (!ownerId) {
